@@ -80,7 +80,7 @@ func main() {
 
 	messageCount := 1000000
 	// remote.DefaultSerializerID = 1
-	remote.Start("127.0.0.1:12001")
+	remote.Start("127.0.0.1:8081")
 
 	rootContext := actor.EmptyRootContext
 	props := actor.
@@ -89,7 +89,7 @@ func main() {
 
 	pid := rootContext.Spawn(props)
 
-	remotePid := actor.NewPID("127.0.0.1:12000", "remote")
+	remotePid := actor.NewPID("127.0.0.1:8080", "remote")
 	rootContext.RequestFuture(remotePid, &messages.StartRemote{
 		Sender: pid,
 	}, 5*time.Second).
