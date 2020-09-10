@@ -23,10 +23,12 @@ type endpoint struct {
 }
 
 type endpointManagerValue struct {
+	stopped            bool
 	connections        *sync.Map
 	config             *remoteConfig
 	endpointSupervisor *actor.PID
 	endpointSub        *eventstream.Subscription
+	endpointReaders    *sync.Map
 }
 
 func startEndpointManager(config *remoteConfig) {
@@ -39,9 +41,11 @@ func startEndpointManager(config *remoteConfig) {
 	endpointSupervisor, _ := rootContext.SpawnNamed(props, "EndpointSupervisor")
 
 	endpointManager = &endpointManagerValue{
+		stopped:            false,
 		connections:        &sync.Map{},
 		config:             config,
 		endpointSupervisor: endpointSupervisor,
+		endpointReaders:    &sync.Map{},
 	}
 
 	endpointManager.endpointSub = eventstream.
@@ -56,10 +60,19 @@ func startEndpointManager(config *remoteConfig) {
 }
 
 func stopEndpointManager() {
+	endpointManager.stopped = true
 	eventstream.Unsubscribe(endpointManager.endpointSub)
 	rootContext.StopFuture(endpointManager.endpointSupervisor).Wait()
 	endpointManager.endpointSub = nil
 	endpointManager.connections = nil
+
+	endpointManager.endpointReaders.Range(func(key interface{}, value interface{}) bool {
+		channel := value.(chan bool)
+		channel <- true
+		endpointManager.endpointReaders.Delete(key)
+		return true
+	})
+
 	plog.Debug("Stopped EndpointManager")
 }
 
@@ -74,18 +87,27 @@ func (em *endpointManagerValue) endpointEvent(evn interface{}) {
 }
 
 func (em *endpointManagerValue) remoteTerminate(msg *remoteTerminate) {
+	if endpointManager.stopped {
+		return
+	}
 	address := msg.Watchee.Address
 	endpoint := em.ensureConnected(address)
 	rootContext.Send(endpoint.watcher, msg)
 }
 
 func (em *endpointManagerValue) remoteWatch(msg *remoteWatch) {
+	if endpointManager.stopped {
+		return
+	}
 	address := msg.Watchee.Address
 	endpoint := em.ensureConnected(address)
 	rootContext.Send(endpoint.watcher, msg)
 }
 
 func (em *endpointManagerValue) remoteUnwatch(msg *remoteUnwatch) {
+	if endpointManager.stopped {
+		return
+	}
 	address := msg.Watchee.Address
 	endpoint := em.ensureConnected(address)
 	rootContext.Send(endpoint.watcher, msg)
@@ -93,6 +115,15 @@ func (em *endpointManagerValue) remoteUnwatch(msg *remoteUnwatch) {
 
 func (em *endpointManagerValue) remoteDeliver(msg *remoteDeliver) {
 	address := msg.target.Address
+	if endpointManager.stopped {
+		// send to deadletter
+		eventstream.Publish(&actor.DeadLetterEvent{
+			PID:     msg.target,
+			Message: msg.message,
+			Sender:  msg.sender,
+		})
+		return
+	}
 	endpoint := em.ensureConnected(address)
 	rootContext.Send(endpoint.writer, msg)
 }
