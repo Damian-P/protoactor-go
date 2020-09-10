@@ -24,7 +24,7 @@ func (s *endpointReader) Connect(ctx context.Context, req *ConnectRequest) (*Con
 
 func (s *endpointReader) Receive(stream Remoting_ReceiveServer) error {
 	disconnectChan := make(chan bool, 1)
-	endpointManager.endpointReaders.Store(stream, disconnectChan)
+	endpointManager.endpointReaderConnections.Store(stream, disconnectChan)
 	defer func() {
 		close(disconnectChan)
 	}()
@@ -38,7 +38,7 @@ func (s *endpointReader) Receive(stream Remoting_ReceiveServer) error {
 				plog.Error("EndpointReader failed to send disconnection message", log.Error(err))
 			}
 		} else {
-			endpointManager.endpointReaders.Delete(stream)
+			endpointManager.endpointReaderConnections.Delete(stream)
 			plog.Debug("EndpointReader removed active endpoint from endpointManager")
 		}
 	}()

@@ -23,12 +23,12 @@ type endpoint struct {
 }
 
 type endpointManagerValue struct {
-	stopped            bool
-	connections        *sync.Map
-	config             *remoteConfig
-	endpointSupervisor *actor.PID
-	endpointSub        *eventstream.Subscription
-	endpointReaders    *sync.Map
+	stopped                   bool
+	connections               *sync.Map
+	config                    *remoteConfig
+	endpointSupervisor        *actor.PID
+	endpointSub               *eventstream.Subscription
+	endpointReaderConnections *sync.Map
 }
 
 func startEndpointManager(config *remoteConfig) {
@@ -41,11 +41,11 @@ func startEndpointManager(config *remoteConfig) {
 	endpointSupervisor, _ := rootContext.SpawnNamed(props, "EndpointSupervisor")
 
 	endpointManager = &endpointManagerValue{
-		stopped:            false,
-		connections:        &sync.Map{},
-		config:             config,
-		endpointSupervisor: endpointSupervisor,
-		endpointReaders:    &sync.Map{},
+		stopped:                   false,
+		connections:               &sync.Map{},
+		config:                    config,
+		endpointSupervisor:        endpointSupervisor,
+		endpointReaderConnections: &sync.Map{},
 	}
 
 	endpointManager.endpointSub = eventstream.
@@ -65,14 +65,14 @@ func stopEndpointManager() {
 	rootContext.StopFuture(endpointManager.endpointSupervisor).Wait()
 	endpointManager.endpointSub = nil
 	endpointManager.connections = nil
-
-	endpointManager.endpointReaders.Range(func(key interface{}, value interface{}) bool {
-		channel := value.(chan bool)
-		channel <- true
-		endpointManager.endpointReaders.Delete(key)
-		return true
-	})
-
+	if endpointManager.endpointReaderConnections != nil {
+		endpointManager.endpointReaderConnections.Range(func(key interface{}, value interface{}) bool {
+			channel := value.(chan bool)
+			channel <- true
+			endpointManager.endpointReaderConnections.Delete(key)
+			return true
+		})
+	}
 	plog.Debug("Stopped EndpointManager")
 }
 
