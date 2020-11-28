@@ -1,6 +1,7 @@
 package remote
 
 import (
+	io "io"
 	"time"
 
 	"github.com/AsynkronIT/protoactor-go/actor"
@@ -59,15 +60,28 @@ func (state *endpointWriter) initializeInternal() error {
 		return err
 	}
 	go func() {
-		_, err := stream.Recv()
-		if err != nil {
-			plog.Info("EndpointWriter lost connection to address", log.String("address", state.address), log.Error(err))
+		for {
+			_, err := stream.Recv()
+			if err == io.EOF {
+				plog.Debug("EndpointWriter stream completed", log.String("address", state.address))
+				break
+			} else if err != nil {
+				plog.Error("EndpointWriter lost connection", log.String("address", state.address), log.Error(err))
 
-			// notify that the endpoint terminated
-			terminated := &EndpointTerminatedEvent{
-				Address: state.address,
+				// notify that the endpoint terminated
+				terminated := &EndpointTerminatedEvent{
+					Address: state.address,
+				}
+				eventstream.Publish(terminated)
+				break
+			} else {
+				plog.Info("EndpointWriter remote disconnected", log.String("address", state.address))
+				// notify that the endpoint terminated
+				terminated := &EndpointTerminatedEvent{
+					Address: state.address,
+				}
+				eventstream.Publish(terminated)
 			}
-			eventstream.Publish(terminated)
 		}
 	}()
 
@@ -159,9 +173,29 @@ func (state *endpointWriter) Receive(ctx actor.Context) {
 	case *actor.Started:
 		state.initialize()
 	case *actor.Stopped:
-		state.conn.Close()
+		if state.stream != nil {
+			err := state.stream.CloseSend()
+			if err != nil {
+				plog.Error("EndpointWriter error when closing the stream", log.Error(err))
+			}
+		} else {
+			err := state.conn.Close()
+			if err != nil {
+				plog.Error("EndpointWriter error when closing the channel", log.Error(err))
+			}
+		}
 	case *actor.Restarting:
-		state.conn.Close()
+		if state.stream != nil {
+			err := state.stream.CloseSend()
+			if err != nil {
+				plog.Error("EndpointWriter error when closing the stream", log.Error(err))
+			}
+		} else {
+			err := state.conn.Close()
+			if err != nil {
+				plog.Error("EndpointWriter error when closing the channel", log.Error(err))
+			}
+		}
 	case *EndpointTerminatedEvent:
 		ctx.Stop(ctx.Self())
 	case []interface{}:

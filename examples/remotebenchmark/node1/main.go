@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime/pprof"
 
+	console "github.com/AsynkronIT/goconsole"
 	"github.com/AsynkronIT/protoactor-go/actor"
 	"github.com/AsynkronIT/protoactor-go/examples/remotebenchmark/messages"
 	"github.com/AsynkronIT/protoactor-go/remote"
@@ -79,37 +80,54 @@ func main() {
 
 	messageCount := 1000000
 	// remote.DefaultSerializerID = 1
-	remote.Start("127.0.0.1:8081")
+	remote.Start("127.0.0.1:0")
 
 	rootContext := actor.EmptyRootContext
-	props := actor.
-		PropsFromProducer(newLocalActor(&wg, messageCount)).
-		WithMailbox(mailbox.Bounded(1000000))
+	run := true
+	go func() {
+		for run == true {
+			props := actor.
+				PropsFromProducer(newLocalActor(&wg, messageCount)).
+				WithMailbox(mailbox.Bounded(1000000))
 
-	pid := rootContext.Spawn(props)
+			pid := rootContext.Spawn(props)
 
-	remotePid := actor.NewPID("127.0.0.1:8080", "remote")
-	rootContext.RequestFuture(remotePid, &messages.StartRemote{
-		Sender: pid,
-	}, 5*time.Second).
-		Wait()
+			pidResponse, err := remote.Spawn("127.0.0.1:12000", "echo", time.Second*2000)
+			if err != nil || pidResponse.StatusCode != 0 {
+				rootContext.Stop(pid)
+				return
+			}
+			remotePid := pidResponse.Pid
+			rootContext.RequestFuture(remotePid, &messages.StartRemote{
+				Sender: pid,
+			}, 5*time.Second).
+				Wait()
 
-	wg.Add(1)
+			wg.Add(1)
 
-	start := time.Now()
-	log.Println("Starting to send")
+			start := time.Now()
+			log.Println("Starting to send")
 
-	message := &messages.Ping{}
-	for i := 0; i < messageCount; i++ {
-		rootContext.Send(remotePid, message)
-	}
+			message := &messages.Ping{}
+			for i := 0; i < messageCount; i++ {
+				rootContext.Send(remotePid, message)
+			}
 
-	wg.Wait()
-	elapsed := time.Since(start)
-	log.Printf("Elapsed %s", elapsed)
+			wg.Wait()
+			elapsed := time.Since(start)
+			log.Printf("Elapsed %s", elapsed)
 
-	x := int(float32(messageCount*2) / (float32(elapsed) / float32(time.Second)))
-	log.Printf("Msg per sec %v", x)
+			x := int(float32(messageCount*2) / (float32(elapsed) / float32(time.Second)))
+			log.Printf("Msg per sec %v", x)
+			rootContext.Stop(remotePid)
+			rootContext.Stop(pid)
+		}
+	}()
+
+	console.ReadLine()
+	run = false
+	console.ReadLine()
+	remote.Shutdown(true)
 
 	// f, err := os.Create("memprofile")
 	// if err != nil {

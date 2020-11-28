@@ -15,7 +15,7 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU() * 1)
 	runtime.GC()
 
-	remote.Start("127.0.0.1:8080")
+	remote.Start("127.0.0.1:12000")
 	var sender *actor.PID
 	rootContext := actor.EmptyRootContext
 	props := actor.
@@ -31,8 +31,9 @@ func main() {
 				}
 			}).
 		WithMailbox(mailbox.Bounded(1000000))
-
+	remote.Register("echo", props)
 	rootContext.SpawnNamed(props, "remote")
 
 	console.ReadLine()
+	remote.Shutdown(true)
 }
